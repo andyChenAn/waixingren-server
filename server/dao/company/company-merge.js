@@ -1,0 +1,138 @@
+const db = require('../../db/company');
+const Mapping = require('../../mongo/system_mapping/index');
+const Company = require('../../mongo/company/index');
+class MergeDao {
+    // 查询方法，一个私有方法，提供查询功能
+    _select (db , sql , sqlParams) {
+        return db.connect().then(connection => {
+            return new Promise((resolve , reject) => {
+                connection.query(sql , sqlParams , (err , result) => {
+                    connection.release();
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(result);
+                    }
+                })
+            })
+        })
+    }
+    // 更新方法，一个私有方法，提供更新功能
+    _update (db , sql , sqlParams) {
+        return db.connect().then(connection => {
+            return new Promise((resolve , reject) => {
+                connection.query(sql , sqlParams , (err , result) => {
+                    connection.release();
+                    if (err) {
+                        reject(err);
+                    } else {
+                        resolve(1);
+                    }
+                })
+            })
+        })
+    }
+    // 获取合并公司列表
+    getMergeList (page , pageSize , type , companyId) {
+        let sql = `select * from \`tb_company_combine-list\` where 1`;
+        if (companyId) {
+            if (type == 's') {
+                sql += ` and CC_CompanyID = '${companyId}'`;
+            } else {
+                sql += ` and CC_TargetCompanyID = '${companyId}'`;
+            }
+        };
+        sql += ` order by CC_AddTime desc limit ${(page - 1) * pageSize} , ${pageSize}`;
+        return this._select(db , sql);
+    }
+    // 通过公司id获取公司信息
+    getCompanyDataById (id) {
+        return Promise.all([
+            this.getCompanyData(id) , 
+            this.getCompanyMapping()
+        ])
+        .then(res => {
+            let company = res[0];
+            let mapping = res[1].collect.company.ci.tb_company_info;
+            let data = {};
+            for (let key in mapping) {
+                if (company[key]) {
+                    data[mapping[key]] = company[key];
+                }
+            };
+            return data;
+        })
+        .catch(err => {
+            throw err;
+        })
+    }
+    getCompanyData (id) {
+        return new Promise((resolve , reject) => {
+            Company.findById(id , (err , result) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    result = JSON.parse(JSON.stringify(result));
+                    if (result['ci']) {
+                        resolve(result['ci'])
+                    } else {
+                        resolve({})
+                    }
+                }
+            })
+        })
+    }
+    getCompanyMapping () {
+        return new Promise((resolve , reject) => {
+            Mapping.find({} , (err , result) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    result = JSON.parse(JSON.stringify(result));
+                    result.forEach(item => {
+                        if (item.collect && 
+                            item.collect.company &&
+                            item.collect.company.ci
+                        ) {
+                            resolve(item);
+                            return;
+                        }
+                    });
+                }
+            })
+        })
+    }
+    // 获取合并公司列表总数
+    getMergeTotal (type , companyId) {
+        let sql = `select count(*) as total from \`tb_company_combine-list\` where 1`;
+        if (companyId) {
+            if (type == 's') {
+                sql += ` and CC_CompanyID = '${companyId}'`;
+            } else {
+                sql += ` and CC_TargetCompanyID = '${companyId}'`;
+            }
+        };
+        return this._select(db , sql);
+    }
+    // 更新合并列表
+    updateMergeList (sourceCompanyId , targetCompanyId , isRecovery) {
+        let updateTime = parseInt(new Date().getTime() / 1000);
+        let sql = `update \`tb_company_combine-list\` set CC_IsRecovery = ? , CC_TargetCompanyID = ? , CC_LastUpdateTime = ? where CC_CompanyID = ?`;
+        let sqlParams = [isRecovery , targetCompanyId , updateTime , sourceCompanyId];
+        return this._update(db , sql , sqlParams);
+    }
+    // 获取过滤公司数据
+    getFilterCompany (companyId) {
+        let sql = `select * from \`tb_company_filterManage\` where CF_CompanyID = '${companyId}'`;
+        return this._select(db , sql);
+    }
+    // 更新过滤公司的状态
+    updateFilterCompany (companyId , isFilter) {
+        let updateTime = parseInt(new Date().getTime() / 1000);
+        let sql = `update \`tb_company_filterManage\` set CF_IsFilter = ? , CF_LastUpdateTime = ? where CF_CompanyID = ?`;
+        let sqlParams = [isFilter , updateTime , companyId];
+        return this._update(db , sql , sqlParams);
+    }
+}
+
+module.exports = new MergeDao();
